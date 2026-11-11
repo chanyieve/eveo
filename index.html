@@ -1,0 +1,1221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="color-scheme" content="light" />
+<meta name="theme-color" content="#f2eadc" />
+<title>Wash — a watercolor study</title>
+<style>
+  :root {
+    --paper: #f2eadc;
+    --ink: #3a3229;
+    --ink-soft: #62574a;
+    --line: rgba(58, 50, 41, 0.16);
+    --line-strong: rgba(58, 50, 41, 0.34);
+    --blue: #1e3c6a;
+    --ochre: #c48a32;
+    --card: rgba(250, 245, 236, 0.84);
+    --ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    margin: 0;
+    overscroll-behavior: none;
+  }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* The canvas holds the low-resolution simulation grid; CSS scales it up. */
+  #paper {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    touch-action: none;
+    cursor: crosshair;
+    z-index: 0;
+    background: var(--paper);
+  }
+
+  /* Paper tooth: a tile generated in JS at start-up, multiplied over the wash. */
+  #tooth {
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    mix-blend-mode: multiply;
+    background-size: 220px 220px;
+  }
+
+  .vignette {
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    background: radial-gradient(135% 105% at 50% 42%, rgba(0, 0, 0, 0) 60%, rgba(96, 72, 40, 0.10) 100%);
+  }
+
+  #ring {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 2;
+    width: 40px;
+    height: 40px;
+    border: 1px solid rgba(58, 50, 41, 0.42);
+    border-radius: 50%;
+    pointer-events: none;
+    opacity: 0;
+    transform: translate3d(-999px, -999px, 0);
+    transition: opacity 160ms ease;
+  }
+  #ring.on { opacity: 1; }
+
+  .masthead {
+    position: fixed;
+    z-index: 2;
+    top: max(18px, env(safe-area-inset-top));
+    left: max(clamp(16px, 3.2vw, 34px), env(safe-area-inset-left));
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .masthead h1 {
+    margin: 0;
+    font-size: clamp(23px, 2.6vw, 29px);
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    line-height: 1.1;
+  }
+  .masthead p {
+    margin: 6px 0 0;
+    font-family: var(--ui);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  #status {
+    display: inline-block;
+    margin-top: 10px;
+    padding: 4px 9px;
+    font-family: var(--ui);
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    color: #f7f2e7;
+    background: var(--ink);
+    border-radius: 99px;
+    opacity: 0;
+    transform: translateY(-3px);
+    transition: opacity 180ms ease, transform 180ms ease;
+  }
+  #status.on { opacity: 1; transform: none; }
+
+  /* ------------------------------------------------------------ controls */
+  .panel {
+    position: fixed;
+    z-index: 3;
+    left: max(clamp(14px, 2.4vw, 28px), env(safe-area-inset-left));
+    bottom: max(16px, env(safe-area-inset-bottom));
+    width: min(356px, calc(100vw - 28px));
+    padding: 15px 16px 12px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 15px;
+    box-shadow: 0 10px 34px rgba(74, 58, 36, 0.11), 0 1px 0 rgba(255, 255, 255, 0.6) inset;
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+    user-select: none;
+    -webkit-user-select: none;
+    font-family: var(--ui);
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 16px;
+  }
+  .ctl { min-width: 0; }
+  .ctl.wide { grid-column: 1 / -1; }
+
+  .ctl-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 2px;
+  }
+
+  .ctl label {
+    font-size: 12px;
+    font-weight: 650;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink);
+  }
+
+  .readout {
+    margin-left: auto;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-soft);
+    white-space: nowrap;
+  }
+
+  .dot {
+    width: 18px;
+    height: 18px;
+    flex: none;
+    border-radius: 50%;
+    box-shadow: 0 0 0 1px rgba(58, 50, 41, 0.2) inset;
+  }
+
+  .ends {
+    display: flex;
+    justify-content: space-between;
+    margin-top: -2px;
+    font-size: 11.5px;
+    color: var(--ink-soft);
+  }
+
+  input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 30px;
+    margin: 0;
+    background: transparent;
+    cursor: pointer;
+    display: block;
+    touch-action: pan-y;
+  }
+  input[type="range"]:focus { outline: none; }
+  input[type="range"]::-webkit-slider-runnable-track {
+    height: 6px;
+    border-radius: 99px;
+    background: rgba(58, 50, 41, 0.2);
+  }
+  input[type="range"].mix::-webkit-slider-runnable-track {
+    background: linear-gradient(to right, #1e3c6a 0%, #6a6350 50%, #c48a32 100%);
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 22px;
+    height: 22px;
+    margin-top: -8px;
+    border-radius: 50%;
+    background: #fffdf8;
+    border: 1.5px solid var(--line-strong);
+    box-shadow: 0 1px 3px rgba(60, 45, 25, 0.26);
+  }
+  input[type="range"]::-moz-range-track {
+    height: 6px;
+    border-radius: 99px;
+    background: rgba(58, 50, 41, 0.2);
+  }
+  input[type="range"].mix::-moz-range-track {
+    background: linear-gradient(to right, #1e3c6a 0%, #6a6350 50%, #c48a32 100%);
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #fffdf8;
+    border: 1.5px solid var(--line-strong);
+    box-shadow: 0 1px 3px rgba(60, 45, 25, 0.26);
+  }
+  input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 4px rgba(44, 70, 96, 0.26); }
+  input[type="range"]:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 4px rgba(44, 70, 96, 0.26); }
+
+  .actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  button {
+    flex: 1;
+    min-height: 44px;
+    padding: 0 12px;
+    font: 600 14px/1 var(--ui);
+    letter-spacing: 0.02em;
+    color: var(--ink);
+    background: rgba(255, 253, 247, 0.8);
+    border: 1px solid var(--line-strong);
+    border-radius: 10px;
+    cursor: pointer;
+    touch-action: manipulation;
+    transition: background 130ms ease, color 130ms ease, border-color 130ms ease;
+  }
+  @media (hover: hover) {
+    button:hover { background: #fffdf7; border-color: rgba(58, 50, 41, 0.5); }
+    button[aria-pressed="true"]:hover { background: #2b251e; }
+  }
+  button:active { transform: translateY(1px); }
+  button:focus-visible { outline: 2px solid rgba(44, 70, 96, 0.6); outline-offset: 2px; }
+  button[aria-pressed="true"] {
+    background: var(--ink);
+    border-color: var(--ink);
+    color: #f7f2e7;
+  }
+
+  .hint {
+    margin: 10px 0 0;
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: var(--ink-soft);
+  }
+  .hint .touch { display: none; }
+  kbd {
+    font: 600 11px/1 var(--ui);
+    padding: 2px 5px;
+    border: 1px solid var(--line-strong);
+    border-radius: 4px;
+    background: rgba(255, 253, 247, 0.7);
+  }
+
+  details {
+    margin-top: 9px;
+    border-top: 1px solid var(--line);
+    padding-top: 6px;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--ink-soft);
+  }
+  summary {
+    cursor: pointer;
+    list-style: none;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    padding: 6px 0;
+  }
+  summary::-webkit-details-marker { display: none; }
+  summary::after { content: "+"; float: right; font-size: 15px; line-height: 1; }
+  details[open] summary::after { content: "–"; }
+  summary:focus-visible { outline: 2px solid rgba(44, 70, 96, 0.6); outline-offset: 2px; border-radius: 4px; }
+  .notes {
+    max-height: min(34vh, 250px);
+    overflow-y: auto;
+    padding-right: 4px;
+    overscroll-behavior: contain;
+  }
+  .notes p { margin: 0 0 7px; }
+  .notes strong { color: var(--ink); font-weight: 650; }
+  #gridOut { font-variant-numeric: tabular-nums; }
+
+  /* ------------------------------------------------------------ phones */
+  @media (max-width: 640px) {
+    .panel {
+      left: max(8px, env(safe-area-inset-left));
+      right: max(8px, env(safe-area-inset-right));
+      bottom: max(8px, env(safe-area-inset-bottom));
+      width: auto;
+      padding: 13px 14px 10px;
+      border-radius: 16px;
+    }
+    .ctl label { font-size: 12.5px; }
+    .readout, .ends { font-size: 12.5px; }
+    input[type="range"] { height: 38px; }
+    input[type="range"]::-webkit-slider-runnable-track { height: 7px; }
+    input[type="range"]::-webkit-slider-thumb { width: 28px; height: 28px; margin-top: -10.5px; }
+    input[type="range"]::-moz-range-thumb { width: 26px; height: 26px; }
+    button { min-height: 48px; font-size: 15px; }
+    .hint { font-size: 13px; }
+    details, summary { font-size: 13px; }
+  }
+
+  @media (pointer: coarse) {
+    .hint .mouse { display: none; }
+    .hint .touch { display: inline; }
+    #ring { display: none; }
+  }
+
+  /* short landscape phones: keep the paper usable */
+  @media (max-height: 480px) {
+    .panel { width: min(430px, calc(100vw - 16px)); padding: 10px 14px 9px; }
+    .grid { grid-template-columns: 1.2fr 1fr 1fr; gap: 4px 14px; }
+    .ctl.wide { grid-column: auto; }
+    .ends, .hint, details { display: none; }
+    .actions { margin-top: 6px; }
+    button { min-height: 40px; }
+    .masthead p { display: none; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    #ring, #status, button { transition: none; }
+  }
+</style>
+<meta name="description" content="An interactive watercolor study in the browser: place pigment with a pointer, watch water carry it, and let it dry. Procedurally rendered, no image assets." />
+<meta property="og:type" content="website" />
+<meta property="og:title" content="Wash — a watercolor study" />
+<meta property="og:description" content="Place pigment with a pointer and watch water carry it. A small procedural watercolor simulation in a single HTML file." />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23f2eadc'/%3E%3Ccircle cx='25' cy='27' r='14' fill='%23163a76' opacity='.78'/%3E%3Ccircle cx='42' cy='39' r='13' fill='%23c48a32' opacity='.74'/%3E%3C/svg%3E" />
+</head>
+<body>
+  <canvas id="paper" role="img" aria-label="Watercolour paper. Drag to place pigment."></canvas>
+  <div id="tooth" aria-hidden="true"></div>
+  <div class="vignette" aria-hidden="true"></div>
+  <div id="ring" aria-hidden="true"></div>
+
+  <header class="masthead">
+    <h1>Wash</h1>
+    <p>A watercolor study</p>
+    <span id="status" role="status" aria-live="polite"></span>
+  </header>
+
+  <section class="panel" aria-label="Paint controls">
+    <div class="grid">
+      <div class="ctl wide">
+        <div class="ctl-top">
+          <label for="mix">Pigment</label>
+          <span class="readout" id="mixOut"></span>
+          <span class="dot" id="dot" aria-hidden="true"></span>
+        </div>
+        <input id="mix" class="mix" type="range" min="0" max="100" value="12" step="1" />
+        <div class="ends" aria-hidden="true"><span>Blue</span><span>Ochre</span></div>
+      </div>
+
+      <div class="ctl">
+        <div class="ctl-top">
+          <label for="water">Water</label>
+          <span class="readout" id="waterOut"></span>
+        </div>
+        <input id="water" type="range" min="0" max="100" value="55" step="1" />
+      </div>
+
+      <div class="ctl">
+        <div class="ctl-top">
+          <label for="size">Brush</label>
+          <span class="readout" id="sizeOut"></span>
+        </div>
+        <input id="size" type="range" min="8" max="110" value="46" step="1" />
+      </div>
+    </div>
+
+    <div class="actions">
+      <button id="pause" type="button" aria-pressed="false">Pause</button>
+      <button id="clear" type="button">Clear</button>
+    </div>
+
+    <p class="hint">
+      <span class="mouse">Drag on the paper to paint; hold still to let pigment pool.
+        <kbd>Space</kbd> pauses, <kbd>C</kbd> clears.</span>
+      <span class="touch">Drag on the paper to paint. Hold still to let pigment pool.</span>
+    </p>
+
+    <details>
+      <summary>How it works</summary>
+      <div class="notes">
+        <p><strong>Rendering.</strong> Nothing here is an image file. The paper is divided into a coarse
+          grid, and each cell stores water, two suspended pigments and two dried pigments. Every step,
+          water creeps into neighbouring paper and evaporates (fastest at the edge of a puddle), while
+          suspended pigment is carried from deep water toward shallow water and gradually fixes to the
+          paper. That outward drift is what leaves the darker rim on a dried stroke.</p>
+        <p>Colour is mixed subtractively: each pigment absorbs light according to how much of it sits in
+          a cell, so blue over ochre deepens toward a grey-green instead of averaging. Ochre is treated
+          as the heavier pigment: it travels less and settles into the grain.</p>
+        <p><strong>Limits.</strong> The simulation runs on the CPU at
+          <span id="gridOut">a reduced resolution</span>, then is scaled up, so edges are soft rather
+          than crisp. If a frame takes too long the grid is coarsened automatically. On a slow device
+          the wash dries more slowly instead of skipping steps. Resizing or rotating keeps the painting
+          but may crop it.</p>
+        <p><strong>Pause</strong> holds the water still. You can keep adding pigment, and it starts
+          moving again when you resume.</p>
+      </div>
+    </details>
+  </section>
+
+  <noscript>
+    <p style="position:fixed;left:16px;right:16px;top:96px;font-family:system-ui;color:#3a3229">
+      This study needs JavaScript to paint.
+    </p>
+  </noscript>
+
+<script>
+(function () {
+  'use strict';
+
+  // ================================================================ palette
+  const PAPER = [242, 234, 220];
+  const BLUE  = [22, 52, 118];    // blue pigment as it absorbs light (prussian-leaning)
+  const OCHRE = [196, 140, 50];   // ochre pigment as it absorbs light
+
+  const C_MAX = 1.15;             // deepest concentration the display resolves
+  const LUT_N = 512;
+  const C_SCALE = (LUT_N - 1) / C_MAX;
+
+  // Beer–Lambert style absorption: transmittance = base ^ concentration
+  function absorptionTable(rgb) {
+    const t = [new Float32Array(LUT_N), new Float32Array(LUT_N), new Float32Array(LUT_N)];
+    for (let ch = 0; ch < 3; ch++) {
+      const k = -Math.log(rgb[ch] / 255);
+      for (let i = 0; i < LUT_N; i++) t[ch][i] = Math.exp(-k * (i / C_SCALE));
+    }
+    return t;
+  }
+  const TB = absorptionTable(BLUE);
+  const TO = absorptionTable(OCHRE);
+
+  // ================================================================ tuning
+  const SIM = {
+    spread: 0.10,        // water equalising between wet neighbours
+    evap: 0.00058,       // water lost per step
+    edgeEvap: 2.4,       // multiplier where a wet cell touches dry paper
+    creepBase: 0.34,     // water a cell needs before it wets a dry neighbour…
+    creepVar: 0.50,      // …plus this much, scaled by local paper roughness
+    pull: 0.42,          // pigment drift from deep water toward shallow water
+    diffuse: 0.050,      // pigment diffusion between wet cells
+    maxFlow: 0.17,       // cap on drift, in cells per step (keeps the scheme stable)
+    mobility: 4.0,       // thin water moves pigment less
+    drift: 0.26,         // strength of the slow background circulation
+    stain: 0.0036,       // fraction of suspended pigment fixing each step while wet
+    settleAt: 0.16,      // below this water level pigment drops out quickly
+    settle: 0.9,
+    ochreMobility: 0.5,  // ochre is heavier: moves less…
+    ochreSettle: 1.7,    // …and fixes faster
+    lift: 0.09           // re-wetting loosens some dried pigment
+  };
+
+  const TARGET_CELLS_FINE = 140000;    // mouse / trackpad devices
+  const TARGET_CELLS_COARSE = 80000;   // touch devices
+  const CELL_MIN = 2, CELL_MAX = 8;
+  const STEP = 1 / 60;
+
+  // ================================================================ elements
+  const canvas = document.getElementById('paper');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  const ring = document.getElementById('ring');
+  const statusEl = document.getElementById('status');
+  const mixEl = document.getElementById('mix');
+  const waterEl = document.getElementById('water');
+  const sizeEl = document.getElementById('size');
+  const pauseEl = document.getElementById('pause');
+  const clearEl = document.getElementById('clear');
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const coarsePointer = window.matchMedia('(pointer: coarse)');
+
+  // ================================================================ state
+  let W = 0, H = 0;                 // canvas size in CSS pixels
+  let cell = 3, gw = 0, gh = 0;     // grid
+  let water, blue, ochre, dryB, dryO;
+  let sW, sB, sO;                   // scratch buffers
+  let rough, tooth, gran;           // static paper properties per cell
+  let colA, colB, colC, colD, rowA, rowB, rowC, rowD;
+  let img;
+
+  // bounding box of wet cells (inclusive); empty when x1 < x0
+  let wx0 = 1, wx1 = 0, wy0 = 1, wy1 = 0;
+  // region that needs repainting
+  let rx0 = 1, rx1 = 0, ry0 = 1, ry1 = 0;
+
+  let running = true;
+  let time = 0;
+
+  // ================================================================ noise
+  function hash2(x, y) {
+    let h = Math.imul(x | 0, 374761393) ^ Math.imul(y | 0, 668265263);
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  }
+  function valueNoise(x, y) {
+    const xi = Math.floor(x), yi = Math.floor(y);
+    let u = x - xi, v = y - yi;
+    u = u * u * (3 - 2 * u);
+    v = v * v * (3 - 2 * v);
+    const a = hash2(xi, yi), b = hash2(xi + 1, yi);
+    const c = hash2(xi, yi + 1), d = hash2(xi + 1, yi + 1);
+    const top = a + (b - a) * u;
+    return top + (c + (d - c) * u - top) * v;
+  }
+
+  // Paper tooth for the overlay: built once, in code, then calibrated so it
+  // darkens the sheet by only a couple of levels rather than mud.
+  function buildToothTile() {
+    const n = 256;
+    const c = document.createElement('canvas');
+    c.width = c.height = n;
+    const g = c.getContext('2d');
+    const im = g.createImageData(n, n);
+    const d = im.data;
+
+    // periodic value noise so the tile repeats without a visible seam
+    function tile(x, y, period) {
+      const xi = Math.floor(x), yi = Math.floor(y);
+      let u = x - xi, v = y - yi;
+      u = u * u * (3 - 2 * u); v = v * v * (3 - 2 * v);
+      const x0 = xi % period, x1 = (xi + 1) % period, y0 = yi % period, y1 = (yi + 1) % period;
+      const a = hash2(x0, y0 + 911), b = hash2(x1, y0 + 911);
+      const cc = hash2(x0, y1 + 911), dd = hash2(x1, y1 + 911);
+      const top = a + (b - a) * u;
+      return top + (cc + (dd - cc) * u - top) * v;
+    }
+
+    const field = new Float32Array(n * n);
+    let sum = 0, sum2 = 0;
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++) {
+        const v = 0.34 * hash2(x + 17, y + 43)
+                + 0.30 * tile(x / 4, y / 4, n / 4)
+                + 0.22 * tile(x / 32, y / 32, n / 32)
+                + 0.14 * tile(x / 2, y / 16, n / 16);
+        field[y * n + x] = v;
+        sum += v; sum2 += v * v;
+      }
+    }
+    const mean = sum / (n * n);
+    const std = Math.sqrt(Math.max(1e-6, sum2 / (n * n) - mean * mean));
+
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++) {
+        // 0..1 where 0.5 is an average part of the sheet
+        let u = 0.5 + (field[y * n + x] - mean) / (2.6 * std);
+        if (u < 0) u = 0; else if (u > 1) u = 1;
+        const v = 1 - 0.010 - 0.030 * u;      // keep the sheet light: 0.960 .. 0.990
+        const p = (y * n + x) * 4;
+        d[p] = 255 * v;
+        d[p + 1] = 255 * (v - 0.0016);
+        d[p + 2] = 255 * (v - 0.006);
+        d[p + 3] = 255;
+      }
+    }
+    g.putImageData(im, 0, 0);
+    document.getElementById('tooth').style.backgroundImage = 'url(' + c.toDataURL('image/png') + ')';
+  }
+
+  // ================================================================ grid
+  function allocate(nextCell) {
+    const old = water ? { water: water, blue: blue, ochre: ochre, dryB: dryB, dryO: dryO, gw: gw, gh: gh, cs: cellWidth } : null;
+
+    cell = nextCell;
+    gw = Math.max(16, Math.round(W / cell));
+    gh = Math.max(16, Math.round(H / cell));
+    const n = gw * gh;
+
+    water = new Float32Array(n);
+    blue = new Float32Array(n);
+    ochre = new Float32Array(n);
+    dryB = new Float32Array(n);
+    dryO = new Float32Array(n);
+    sW = new Float32Array(n);
+    sB = new Float32Array(n);
+    sO = new Float32Array(n);
+    rough = new Float32Array(n);
+    tooth = new Float32Array(n);
+    gran = new Float32Array(n);
+    colA = new Float32Array(gw); colB = new Float32Array(gw);
+    colC = new Float32Array(gw); colD = new Float32Array(gw);
+    rowA = new Float32Array(gh); rowB = new Float32Array(gh);
+    rowC = new Float32Array(gh); rowD = new Float32Array(gh);
+
+    // paper properties are defined in screen space so they survive a change of grid
+    const cs = W / gw;
+    for (let j = 0; j < gh; j++) {
+      for (let i = 0; i < gw; i++) {
+        const x = i * cs, y = j * cs;
+        const k = j * gw + i;
+        rough[k] = 0.6 * valueNoise(x / 22, y / 22) + 0.4 * valueNoise(x / 7 + 40, y / 7 + 12);
+        tooth[k] = 0.86 + 0.28 * valueNoise(x / 5 + 9, y / 5 + 77);
+        gran[k] = 0.50 + 1.0 * (0.5 * valueNoise(x / 3.2 + 3, y / 3.2 + 51) + 0.5 * hash2(i + 5, j + 11));
+      }
+    }
+
+    if (old) {
+      // carry the painting across, anchored at the top-left corner
+      const ratio = cs / old.cs;
+      for (let j = 0; j < gh; j++) {
+        const sj = Math.floor((j + 0.5) * ratio);
+        if (sj >= old.gh) break;
+        for (let i = 0; i < gw; i++) {
+          const si = Math.floor((i + 0.5) * ratio);
+          if (si >= old.gw) break;
+          const s = sj * old.gw + si, k = j * gw + i;
+          water[k] = old.water[s];
+          blue[k] = old.blue[s];
+          ochre[k] = old.ochre[s];
+          dryB[k] = old.dryB[s];
+          dryO[k] = old.dryO[s];
+        }
+      }
+    }
+    cellWidth = cs;
+
+    canvas.width = gw;
+    canvas.height = gh;
+    img = ctx.createImageData(gw, gh);
+    const d = img.data;
+    for (let p = 3; p < d.length; p += 4) d[p] = 255;
+
+    // rebuild the wet bounds and repaint everything
+    wx0 = gw; wx1 = -1; wy0 = gh; wy1 = -1;
+    for (let j = 0; j < gh; j++) {
+      for (let i = 0; i < gw; i++) {
+        if (water[j * gw + i] > 0) {
+          if (i < wx0) wx0 = i;
+          if (i > wx1) wx1 = i;
+          if (j < wy0) wy0 = j;
+          if (j > wy1) wy1 = j;
+        }
+      }
+    }
+    rx0 = 0; ry0 = 0; rx1 = gw - 1; ry1 = gh - 1;
+
+    const out = document.getElementById('gridOut');
+    if (out) out.textContent = gw + ' × ' + gh + ' cells (about ' + (Math.round(cs * 10) / 10) + ' px each)';
+  }
+  let cellWidth = 0;   // previous grid's cell size in CSS pixels
+
+  function idealCell() {
+    const target = coarsePointer.matches ? TARGET_CELLS_COARSE : TARGET_CELLS_FINE;
+    const c = Math.sqrt((W * H) / target);
+    return Math.min(CELL_MAX, Math.max(CELL_MIN, Math.round(c * 4) / 4));
+  }
+
+  let adapted = false;
+
+  function fit(force) {
+    const r = canvas.getBoundingClientRect();
+    const nw = Math.max(1, Math.round(r.width)), nh = Math.max(1, Math.round(r.height));
+    // A phone's address bar sliding away changes only the height slightly;
+    // let CSS stretch the canvas rather than resampling the painting for that.
+    if (!force && nw === W && Math.abs(nh - H) < H * 0.16) return;
+    W = nw; H = nh;
+    const want = idealCell();
+    allocate(force || adapted ? want : Math.min(cell, want));
+  }
+
+  // ================================================================ brush
+  function brushFromControls() {
+    return makeBrush(mixEl.value / 100, waterEl.value / 100, Number(sizeEl.value));
+  }
+
+  function makeBrush(mix, wet, sizePx) {
+    return {
+      mix: mix,
+      radius: sizePx / 2,
+      water: 0.24 + 0.78 * wet,               // water level a stroke leaves behind
+      pigment: 0.46 * (1.25 - 0.72 * wet)     // wetter brush, more dilute colour
+    };
+  }
+
+  // gx, gy, gr are in grid cells
+  function stamp(gx, gy, gr, b, weight, pooling) {
+    const cr = gr < 1.15 ? 1.15 : gr;
+    const cx = gx - 0.5, cy = gy - 0.5;
+    const reach = cr * 1.14 + 1;
+    let i0 = Math.floor(cx - reach), i1 = Math.ceil(cx + reach);
+    let j0 = Math.floor(cy - reach), j1 = Math.ceil(cy + reach);
+    if (i0 < 0) i0 = 0;
+    if (j0 < 0) j0 = 0;
+    if (i1 > gw - 1) i1 = gw - 1;
+    if (j1 > gh - 1) j1 = gh - 1;
+    if (i1 < i0 || j1 < j0) return;
+
+    const pB = b.pigment * (1 - b.mix) * weight;
+    const pO = b.pigment * b.mix * weight;
+    const inv = 1 / cr;
+    let any = false;
+
+    for (let j = j0; j <= j1; j++) {
+      const dy = j - cy;
+      const row = j * gw;
+      for (let i = i0; i <= i1; i++) {
+        const dx = i - cx;
+        const k = row + i;
+        const d = Math.sqrt(dx * dx + dy * dy) * inv;
+        // flat middle, soft shoulder, and an edge broken up by the paper
+        let f = (1 - d - 0.26 * (rough[k] - 0.5)) * 2.7;
+        if (f <= 0) continue;
+        if (f > 1) f = 1;
+        any = true;
+
+        const w = water[k];
+        if (pooling) {
+          if (w < 1.3) water[k] = w + 0.012 * f;
+        } else {
+          const wt = b.water * f;
+          if (wt > w) water[k] = w + (wt - w) * 0.8;
+        }
+
+        // re-wetting loosens a little of what has already dried
+        const lf = SIM.lift * f * (pooling ? 0.15 : 1);
+        let v = dryB[k];
+        if (v > 0) { v *= lf; dryB[k] -= v; blue[k] += v; }
+        v = dryO[k];
+        if (v > 0) { v *= lf * 0.6; dryO[k] -= v; ochre[k] += v; }
+
+        // the paper can only hold so much
+        if (pB > 0) {
+          const room = 1 - (blue[k] + dryB[k]) / C_MAX;
+          if (room > 0) blue[k] += pB * f * room;
+        }
+        if (pO > 0) {
+          const room = 1 - (ochre[k] + dryO[k]) / C_MAX;
+          if (room > 0) ochre[k] += pO * f * room;
+        }
+      }
+    }
+    if (!any) return;
+
+    if (wx1 < wx0) { wx0 = i0; wx1 = i1; wy0 = j0; wy1 = j1; }
+    else {
+      if (i0 < wx0) wx0 = i0;
+      if (i1 > wx1) wx1 = i1;
+      if (j0 < wy0) wy0 = j0;
+      if (j1 > wy1) wy1 = j1;
+    }
+    if (rx1 < rx0) { rx0 = i0; rx1 = i1; ry0 = j0; ry1 = j1; }
+    else {
+      if (i0 < rx0) rx0 = i0;
+      if (i1 > rx1) rx1 = i1;
+      if (j0 < ry0) ry0 = j0;
+      if (j1 > ry1) ry1 = j1;
+    }
+  }
+
+  // Draw from the last point of `s` to (x, y); all in CSS pixels on the canvas.
+  function strokeTo(s, x, y, b, radiusPx) {
+    const scale = gw / W;
+    if (!s.started) {
+      s.started = true;
+      s.x = x; s.y = y;
+      stamp(x * scale, y * scale, radiusPx * scale, b, 0.55, false);
+      return;
+    }
+    const dx = x - s.x, dy = y - s.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 0.75) return;
+    const stepLen = Math.max(1.5, radiusPx * 0.3);
+    const n = Math.ceil(dist / stepLen);
+    // Stamp spacing is normalised by the brush width, so a slow stroke and a fast
+    // one deposit the same amount per unit of paper.
+    const weight = (dist / n) / (2 * radiusPx);
+    for (let q = 1; q <= n; q++) {
+      const t = q / n;
+      stamp((s.x + dx * t) * scale, (s.y + dy * t) * scale, radiusPx * scale, b, weight, false);
+    }
+    s.x = x; s.y = y;
+  }
+
+  // ================================================================ pointer input
+  const pointers = new Map();
+
+  function canvasPoint(e) {
+    const r = canvas.getBoundingClientRect();
+    return {
+      x: (e.clientX - r.left) / r.width * W,
+      y: (e.clientY - r.top) / r.height * H
+    };
+  }
+
+  function radiusFor(e, b) {
+    if (e.pointerType === 'pen' && e.pressure > 0) return b.radius * (0.45 + 1.0 * e.pressure);
+    return b.radius;
+  }
+
+  canvas.addEventListener('pointerdown', function (e) {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.preventDefault();
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* synthetic events */ }
+    const s = { started: false, x: 0, y: 0, moved: performance.now(), type: e.pointerType, pressure: e.pressure };
+    pointers.set(e.pointerId, s);
+    const p = canvasPoint(e);
+    const b = brushFromControls();
+    strokeTo(s, p.x, p.y, b, radiusFor(e, b));
+  });
+
+  canvas.addEventListener('pointermove', function (e) {
+    if (e.pointerType !== 'touch') {
+      const d = Number(sizeEl.value);
+      ring.style.transform = 'translate3d(' + (e.clientX - d / 2) + 'px,' + (e.clientY - d / 2) + 'px,0)';
+      ring.classList.add('on');
+    }
+    const s = pointers.get(e.pointerId);
+    if (!s) return;
+    const b = brushFromControls();
+    const list = e.getCoalescedEvents ? e.getCoalescedEvents() : null;
+    if (list && list.length > 1) {
+      for (let i = 0; i < list.length; i++) {
+        const p = canvasPoint(list[i]);
+        strokeTo(s, p.x, p.y, b, radiusFor(list[i], b));
+      }
+    } else {
+      const p = canvasPoint(e);
+      strokeTo(s, p.x, p.y, b, radiusFor(e, b));
+    }
+    s.pressure = e.pressure;
+    s.moved = performance.now();
+  });
+
+  function release(e) { pointers.delete(e.pointerId); }
+  canvas.addEventListener('pointerup', release);
+  canvas.addEventListener('pointercancel', release);
+  canvas.addEventListener('lostpointercapture', release);
+  canvas.addEventListener('pointerleave', function () { ring.classList.remove('on'); });
+  canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  // ================================================================ simulation
+  function tick() {
+    if (wx1 < wx0) return;
+    time += STEP;
+
+    const i0 = wx0 > 0 ? wx0 - 1 : 0, i1 = wx1 < gw - 1 ? wx1 + 1 : gw - 1;
+    const j0 = wy0 > 0 ? wy0 - 1 : 0, j1 = wy1 < gh - 1 ? wy1 + 1 : gh - 1;
+
+    // everything in this box may change appearance
+    if (rx1 < rx0) { rx0 = i0; rx1 = i1; ry0 = j0; ry1 = j1; }
+    else {
+      if (i0 < rx0) rx0 = i0;
+      if (i1 > rx1) rx1 = i1;
+      if (j0 < ry0) ry0 = j0;
+      if (j1 > ry1) ry1 = j1;
+    }
+
+    const spread = SIM.spread, evap = SIM.evap, edgeEvap = SIM.evap * SIM.edgeEvap;
+    const creepBase = SIM.creepBase, creepVar = SIM.creepVar;
+
+    // ---- 1. water: equalise, creep into dry paper, evaporate
+    for (let j = j0; j <= j1; j++) {
+      const row = j * gw;
+      const up = j > 0 ? -gw : 0, dn = j < gh - 1 ? gw : 0;
+      for (let i = i0; i <= i1; i++) {
+        const k = row + i;
+        const w = water[k];
+        const kl = i > 0 ? k - 1 : k, kr = i < gw - 1 ? k + 1 : k;
+        const ku = k + up, kd = k + dn;
+        const wl = water[kl], wr = water[kr], wu = water[ku], wd = water[kd];
+
+        sB[k] = blue[k];
+        sO[k] = ochre[k];
+
+        if (w > 0) {
+          // A dry neighbour takes water only if this cell is wet enough to break
+          // into it; otherwise the edge holds, like a bead of water on paper.
+          let acc = 0, edge = false;
+          if (wl > 0) acc += wl - w; else if (kl !== k) { edge = true; if (w > creepBase + creepVar * rough[kl]) acc -= w; }
+          if (wr > 0) acc += wr - w; else if (kr !== k) { edge = true; if (w > creepBase + creepVar * rough[kr]) acc -= w; }
+          if (wu > 0) acc += wu - w; else if (ku !== k) { edge = true; if (w > creepBase + creepVar * rough[ku]) acc -= w; }
+          if (wd > 0) acc += wd - w; else if (kd !== k) { edge = true; if (w > creepBase + creepVar * rough[kd]) acc -= w; }
+          let nw = w + spread * acc - (edge ? edgeEvap : evap);
+          sW[k] = nw > 0.003 ? nw : 0;
+        } else {
+          const need = creepBase + creepVar * rough[k];
+          let acc = 0;
+          if (wl > need) acc += wl;
+          if (wr > need) acc += wr;
+          if (wu > need) acc += wu;
+          if (wd > need) acc += wd;
+          sW[k] = spread * acc;
+        }
+      }
+    }
+
+    // ---- 2. suspended pigment: exchanged across cell faces, so none is created or lost
+    // background circulation from a stream function, which keeps it divergence-free
+    const drift = reducedMotion.matches ? 0 : SIM.drift;
+    const f1 = 0.115, f2 = 0.047, ph = time * 0.21;
+    let prevA = Math.sin(f1 * (i0 - 0.5) + ph), prevC = Math.sin(f2 * (i0 - 0.5) - ph * 0.6 + 2.0);
+    for (let i = i0; i <= i1; i++) {
+      const a = Math.sin(f1 * (i + 0.5) + ph), c = Math.sin(f2 * (i + 0.5) - ph * 0.6 + 2.0);
+      colA[i] = a; colB[i] = a - prevA; colC[i] = c; colD[i] = c - prevC;
+      prevA = a; prevC = c;
+    }
+    prevA = Math.sin(f1 * 1.3 * (j0 - 0.5) - ph * 0.8 + 1.0); prevC = Math.sin(f2 * 1.2 * (j0 - 0.5) + ph * 0.5);
+    for (let j = j0; j <= j1; j++) {
+      const a = Math.sin(f1 * 1.3 * (j + 0.5) - ph * 0.8 + 1.0), c = Math.sin(f2 * 1.2 * (j + 0.5) + ph * 0.5);
+      rowA[j] = a; rowB[j] = a - prevA; rowC[j] = c; rowD[j] = c - prevC;
+      prevA = a; prevC = c;
+    }
+
+    const pull = SIM.pull, diff = SIM.diffuse, maxFlow = SIM.maxFlow, mob = SIM.mobility, om = SIM.ochreMobility;
+    const dA = drift, dC = drift * 1.9;
+
+    for (let j = j0; j <= j1; j++) {
+      const row = j * gw;
+      const rA = rowA[j], rB = rowB[j], rC = rowC[j], rD = rowD[j];
+      for (let i = i0; i <= i1; i++) {
+        const k = row + i;
+        const w = water[k];
+        if (w <= 0) continue;
+        const bk = blue[k], ok = ochre[k];
+
+        if (i < gw - 1) {
+          const r = k + 1, w2 = water[r];
+          if (w2 > 0) {
+            const b2 = blue[r], o2 = ochre[r];
+            if (bk > 0 || ok > 0 || b2 > 0 || o2 > 0) {
+              let m = (w < w2 ? w : w2) * mob; if (m > 1) m = 1;
+              let u = (pull * (w - w2) + dA * colA[i] * rB + dC * colC[i] * rD) * m;
+              if (u > maxFlow) u = maxFlow; else if (u < -maxFlow) u = -maxFlow;
+              const dm = diff * m;
+              let f = (u > 0 ? bk : b2) * u + dm * (bk - b2);
+              sB[k] -= f; sB[r] += f;
+              f = ((u > 0 ? ok : o2) * u + dm * (ok - o2)) * om;
+              sO[k] -= f; sO[r] += f;
+            }
+          }
+        }
+        if (j < gh - 1) {
+          const r = k + gw, w2 = water[r];
+          if (w2 > 0) {
+            const b2 = blue[r], o2 = ochre[r];
+            if (bk > 0 || ok > 0 || b2 > 0 || o2 > 0) {
+              let m = (w < w2 ? w : w2) * mob; if (m > 1) m = 1;
+              let u = (pull * (w - w2) - dA * colB[i] * rA - dC * colD[i] * rC) * m;
+              if (u > maxFlow) u = maxFlow; else if (u < -maxFlow) u = -maxFlow;
+              const dm = diff * m;
+              let f = (u > 0 ? bk : b2) * u + dm * (bk - b2);
+              sB[k] -= f; sB[r] += f;
+              f = ((u > 0 ? ok : o2) * u + dm * (ok - o2)) * om;
+              sO[k] -= f; sO[r] += f;
+            }
+          }
+        }
+      }
+    }
+
+    // ---- 3. commit, and let pigment fix to the paper
+    const stain = SIM.stain, settleAt = SIM.settleAt, settle = SIM.settle, os = SIM.ochreSettle;
+    let nx0 = gw, nx1 = -1, ny0 = gh, ny1 = -1;
+    for (let j = j0; j <= j1; j++) {
+      const row = j * gw;
+      let rowWet = false;
+      for (let i = i0; i <= i1; i++) {
+        const k = row + i;
+        const w = sW[k];
+        water[k] = w;
+        let b = sB[k], o = sO[k];
+
+        if (w > 0) {
+          rowWet = true;
+          if (i < nx0) nx0 = i;
+          if (i > nx1) nx1 = i;
+          if (b > 0 || o > 0) {
+            let fr = stain;
+            if (w < settleAt) fr += (settleAt - w) * settle;
+            if (b > 1e-5) { const m = b * fr; b -= m; dryB[k] += m; }
+            else if (b !== 0) { dryB[k] += b; b = 0; }
+            if (o > 1e-5) { let fo = fr * os; if (fo > 1) fo = 1; const m = o * fo; o -= m; dryO[k] += m; }
+            else if (o !== 0) { dryO[k] += o; o = 0; }
+          }
+        } else {
+          if (b !== 0) { dryB[k] += b; b = 0; }
+          if (o !== 0) { dryO[k] += o; o = 0; }
+        }
+        blue[k] = b;
+        ochre[k] = o;
+      }
+      if (rowWet) { if (j < ny0) ny0 = j; ny1 = j; }
+    }
+    wx0 = nx0; wx1 = nx1; wy0 = ny0; wy1 = ny1;
+  }
+
+  // ================================================================ drawing
+  function render() {
+    if (rx1 < rx0) return;
+    const d = img.data;
+    const pr = PAPER[0], pg = PAPER[1], pb = PAPER[2];
+    const bR = TB[0], bG = TB[1], bB = TB[2];
+    const oR = TO[0], oG = TO[1], oB = TO[2];
+    const top = LUT_N - 1;
+
+    for (let j = ry0; j <= ry1; j++) {
+      let k = j * gw + rx0;
+      let p = k * 4;
+      for (let i = rx0; i <= rx1; i++, k++, p += 4) {
+        // dried pigment sits in the paper grain; ochre granulates more strongly
+        const cb = blue[k] + dryB[k] * tooth[k];
+        const co = ochre[k] + dryO[k] * gran[k];
+        if (cb === 0 && co === 0 && water[k] === 0) {
+          d[p] = pr; d[p + 1] = pg; d[p + 2] = pb;
+          continue;
+        }
+        let ib = (cb * C_SCALE + 0.5) | 0; if (ib > top) ib = top;
+        let io = (co * C_SCALE + 0.5) | 0; if (io > top) io = top;
+        // wet paper reads slightly darker and cooler
+        const w = water[k];
+        const sheen = 1 - 0.085 * (w < 0.7 ? w / 0.7 : 1);
+        d[p]     = pr * bR[ib] * oR[io] * sheen;
+        d[p + 1] = pg * bG[ib] * oG[io] * sheen;
+        d[p + 2] = pb * bB[ib] * oB[io] * (sheen + (1 - sheen) * 0.25);
+      }
+    }
+    ctx.putImageData(img, 0, 0, rx0, ry0, rx1 - rx0 + 1, ry1 - ry0 + 1);
+    rx0 = 1; rx1 = 0; ry0 = 1; ry1 = 0;
+  }
+
+  // ================================================================ controls
+  function clearPaper() {
+    water.fill(0); blue.fill(0); ochre.fill(0); dryB.fill(0); dryO.fill(0);
+    wx0 = 1; wx1 = 0; wy0 = 1; wy1 = 0;
+    rx0 = 0; ry0 = 0; rx1 = gw - 1; ry1 = gh - 1;
+    announce('Paper cleared', 1400);
+  }
+
+  let statusTimer = 0;
+  function announce(text, ms) {
+    clearTimeout(statusTimer);
+    statusEl.textContent = text;
+    statusEl.classList.add('on');
+    if (ms) statusTimer = setTimeout(function () {
+      if (running) statusEl.classList.remove('on');
+      else statusEl.textContent = 'Paused';
+    }, ms);
+  }
+
+  function setPaused(paused) {
+    running = !paused;
+    pauseEl.setAttribute('aria-pressed', String(paused));
+    pauseEl.textContent = paused ? 'Resume' : 'Pause';
+    clearTimeout(statusTimer);
+    if (paused) { statusEl.textContent = 'Paused'; statusEl.classList.add('on'); }
+    else statusEl.classList.remove('on');
+  }
+
+  pauseEl.addEventListener('click', function () { setPaused(running); });
+  clearEl.addEventListener('click', clearPaper);
+
+  function refreshControls() {
+    const mix = mixEl.value / 100;
+    const rgb = [0, 1, 2].map(function (ch) {
+      const kb = -Math.log(BLUE[ch] / 255), ko = -Math.log(OCHRE[ch] / 255);
+      return Math.round(PAPER[ch] * Math.exp(-(kb * (1 - mix) + ko * mix) * 0.8));
+    });
+    document.getElementById('dot').style.background = 'rgb(' + rgb.join(',') + ')';
+    const pctO = Math.round(mix * 100);
+    const label = pctO <= 3 ? 'Blue' : pctO >= 97 ? 'Ochre' : (100 - pctO) + ' / ' + pctO;
+    document.getElementById('mixOut').textContent = label;
+    mixEl.setAttribute('aria-valuetext', (100 - pctO) + '% blue, ' + pctO + '% ochre');
+
+    const wet = Number(waterEl.value);
+    document.getElementById('waterOut').textContent = wet < 25 ? 'Dry' : wet < 60 ? 'Damp' : wet < 85 ? 'Wet' : 'Soaked';
+    waterEl.setAttribute('aria-valuetext', wet + '% water');
+
+    const size = Number(sizeEl.value);
+    document.getElementById('sizeOut').textContent = size + ' px';
+    ring.style.width = ring.style.height = size + 'px';
+  }
+  [mixEl, waterEl, sizeEl].forEach(function (el) { el.addEventListener('input', refreshControls); });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const tag = e.target && e.target.tagName;
+    if (e.code === 'Space') {
+      if (tag === 'BUTTON' || tag === 'SUMMARY') return;   // let the focused control handle it
+      e.preventDefault();
+      setPaused(running);
+    } else if (e.key === 'c' || e.key === 'C') {
+      clearPaper();
+    }
+  });
+
+  // ================================================================ opening wash
+  function openingWash() {
+    const wide = W >= 760;
+    const cx = wide ? W * 0.60 : W * 0.5;
+    const cy = wide ? H * 0.43 : H * 0.29;
+    const s = wide ? Math.min(W * 0.33, H * 0.40) : Math.min(W * 0.44, H * 0.23);
+
+    function run(mix, wet, size, pts) {
+      const b = makeBrush(mix, wet, size * s);
+      const st = { started: false, x: 0, y: 0 };
+      for (let q = 0; q < pts.length; q++) strokeTo(st, cx + pts[q][0] * s, cy + pts[q][1] * s, b, b.radius);
+    }
+    function path(x0, y0, x1, y1, wobble, turns) {
+      const pts = [];
+      for (let q = 0; q <= 24; q++) {
+        const t = q / 24;
+        pts.push([x0 + (x1 - x0) * t, y0 + (y1 - y0) * t + Math.sin(t * turns) * wobble]);
+      }
+      return pts;
+    }
+    run(0.02, 0.88, 0.38, path(-0.98, -0.44, 0.92, -0.52, 0.06, 5));
+    run(0.06, 0.46, 0.22, path(-0.78, -0.13, 0.50, -0.20, 0.05, 7));
+    run(0.93, 0.70, 0.30, path(-0.70, 0.30, 0.90, 0.22, 0.05, 4));
+    run(0.30, 0.34, 0.11, path(0.05, 0.03, 0.62, 0.07, 0.03, 6));
+  }
+
+  // ================================================================ main loop
+  let last = 0, acc = 0, cost = 0, slowFrames = 0;
+
+  function frame(now) {
+    requestAnimationFrame(frame);
+    let dt = last ? (now - last) / 1000 : STEP;
+    last = now;
+    if (dt > 0.1) dt = 0.1;
+
+    const t0 = performance.now();
+
+    // a brush held still keeps feeding the puddle
+    if (pointers.size) {
+      const b = brushFromControls();
+      const scale = gw / W;
+      pointers.forEach(function (s) {
+        if (s.started && t0 - s.moved > 110) {
+          const r = s.type === 'pen' && s.pressure > 0 ? b.radius * (0.45 + s.pressure) : b.radius;
+          stamp(s.x * scale, s.y * scale, r * scale, b, 0.045, true);
+        }
+      });
+    }
+
+    let stepped = false;
+    if (running && wx1 >= wx0) {
+      acc += dt;
+      let n = 0;
+      while (acc >= STEP && n < 2) { tick(); acc -= STEP; n++; stepped = true; }
+      if (acc > STEP) acc = 0;          // never try to catch up: slow devices dry slower
+    } else {
+      acc = 0;
+    }
+
+    render();
+
+    // if the work does not fit in a frame, trade resolution for speed
+    if (stepped) {
+      cost += (performance.now() - t0 - cost) * 0.08;
+      if (cost > 11 && cell < CELL_MAX) {
+        if (++slowFrames > 50) {
+          adapted = true;
+          allocate(Math.min(CELL_MAX, cell * 1.25));
+          slowFrames = 0;
+          cost = 0;
+        }
+      } else if (slowFrames > 0) {
+        slowFrames--;
+      }
+    }
+  }
+
+  // ================================================================ start
+  let resizeTimer = 0;
+  window.addEventListener('resize', function () {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function () { fit(false); }, 120);
+  });
+  document.addEventListener('visibilitychange', function () { last = 0; acc = 0; });
+
+  buildToothTile();
+  refreshControls();
+  fit(true);
+  openingWash();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
